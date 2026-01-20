@@ -16,9 +16,24 @@ export const createScholarship = async (req, res) => {
       deadline
     } = req.body;
 
-    if (!title || !amount || !deadline) {
+    // 🔹 Required fields validation
+    if (!title || !description || !amount || !deadline) {
       return res.status(400).json({
-        msg: "Title, amount and deadline are required"
+        msg: "Title, description, amount and deadline are required"
+      });
+    }
+
+    // 🔹 Provider validation
+    if (!provider || !provider.type) {
+      return res.status(400).json({
+        msg: "Provider type is required"
+      });
+    }
+
+    // 🔹 Deadline validation
+    if (new Date(deadline) < new Date()) {
+      return res.status(400).json({
+        msg: "Deadline must be a future date"
       });
     }
 
@@ -41,7 +56,10 @@ export const createScholarship = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ msg: "Failed to create scholarship" });
+    res.status(500).json({
+      msg: "Failed to create scholarship",
+      error: err.message
+    });
   }
 };
 
@@ -49,9 +67,15 @@ export const createScholarship = async (req, res) => {
    MODERATOR: VIEW OWN SCHOLARSHIPS
 =========================== */
 export const getMyScholarships = async (req, res) => {
-  const data = await Scholarship.find({
-    createdBy: req.user.id
-  }).sort({ createdAt: -1 });
+  try {
+    const data = await Scholarship.find({
+      createdBy: req.user.id
+    }).sort({ createdAt: -1 });
 
-  res.json(data);
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Failed to fetch scholarships" });
+  }
 };
+
