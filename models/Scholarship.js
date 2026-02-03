@@ -111,7 +111,31 @@ const scholarshipSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true
-    }
+    },
+
+    /* VERIFICATION (Admin/Moderator trust) */
+    verificationStatus: {
+      type: String,
+      enum: ["UNVERIFIED", "VERIFIED", "FLAGGED"],
+      default: "UNVERIFIED"
+    },
+
+    riskScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100
+    },
+
+    internalNotes: [
+      {
+        note: { type: String, required: true },
+        addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        addedAt: { type: Date, default: Date.now }
+      }
+    ],
+
+    flagReason: { type: String }
   },
   { timestamps: true }
 );
