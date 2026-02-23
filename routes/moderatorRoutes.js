@@ -5,6 +5,7 @@ import {
   updateScholarship,
   deleteScholarship,
   getAssistanceRequests,
+  getAssistanceRequestDetail,
   replyToAssistance,
   resolveAssistance,
   getScholarshipApplications
@@ -21,6 +22,7 @@ router.delete("/scholarships/:id", authMiddleware, roleMiddleware("MODERATOR"), 
 router.get("/scholarships/:id/applications", authMiddleware, roleMiddleware("MODERATOR"), getScholarshipApplications);
 
 router.get("/assistance", authMiddleware, roleMiddleware("MODERATOR"), getAssistanceRequests);
+router.get("/assistance/:id", authMiddleware, roleMiddleware("MODERATOR"), getAssistanceRequestDetail);
 router.put("/assistance/:id/reply", authMiddleware, roleMiddleware("MODERATOR"), replyToAssistance);
 router.put("/assistance/:id/resolve", authMiddleware, roleMiddleware("MODERATOR"), resolveAssistance);
 

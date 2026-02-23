@@ -13,6 +13,21 @@ const scholarshipSchema = new mongoose.Schema(
       required: true
     },
 
+    localizedContent: {
+      en: {
+        title: String,
+        description: String
+      },
+      hi: {
+        title: String,
+        description: String
+      },
+      mr: {
+        title: String,
+        description: String
+      }
+    },
+
     provider: {
       name: String,
       type: {
@@ -32,6 +47,8 @@ const scholarshipSchema = new mongoose.Schema(
     benefits: {
       type: String // tuition fee, stipend, hostel etc
     },
+
+    tags: [String],
 
     /* ELIGIBILITY */
     eligibility: {
@@ -68,6 +85,13 @@ const scholarshipSchema = new mongoose.Schema(
     documentsRequired: [
       {
         type: String // Aadhaar, Income Certificate, Caste Certificate etc
+      }
+    ],
+
+    commonMistakes: [
+      {
+        type: String,
+        trim: true
       }
     ],
 
@@ -139,5 +163,9 @@ const scholarshipSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+scholarshipSchema.index({ status: 1, isActive: 1, deadline: 1 });
+scholarshipSchema.index({ title: "text", description: "text", tags: "text" });
+scholarshipSchema.index({ "provider.type": 1 });
 
 export default mongoose.model("Scholarship", scholarshipSchema);

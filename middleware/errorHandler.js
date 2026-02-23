@@ -3,6 +3,10 @@
  * Must be registered after all routes.
  */
 const errorHandler = (err, req, res, next) => {
+  if (err?.name === "MulterError") {
+    return res.status(400).json({ message: err.message });
+  }
+
   console.error(err.stack);
   const status = err.statusCode || err.status || 500;
   const message = err.message || "Internal Server Error";

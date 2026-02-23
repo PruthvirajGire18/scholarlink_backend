@@ -21,7 +21,7 @@ const auditLogSchema = new mongoose.Schema(
 
     entityType: {
       type: String,
-      enum: ["USER", "SCHOLARSHIP", "DOCUMENT", "FRAUD_ALERT"],
+      enum: ["USER", "SCHOLARSHIP", "DOCUMENT", "APPLICATION", "FRAUD_ALERT"],
       required: true
     },
 

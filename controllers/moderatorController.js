@@ -1,53 +1,81 @@
-import Scholarship from "../models/Scholarship.js";
-import AssistanceRequest from "../models/AssistanceRequest.js";
 import Application from "../models/Application.js";
+import AssistanceRequest from "../models/AssistanceRequest.js";
+import Document from "../models/Document.js";
+import Scholarship from "../models/Scholarship.js";
+import UserProfile from "../models/UserProfile.js";
 
-/* ===========================
-   MODERATOR: CREATE SCHOLARSHIP
-=========================== */
+function isValidExternalUrl(value) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeStringList(value) {
+  if (!value) return [];
+  const rawList = Array.isArray(value) ? value : [value];
+  return rawList
+    .flatMap((item) => String(item || "").split(/\n|,|;|\/|\|/g))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeScholarshipPayload(body, existing = {}) {
+  return {
+    title: String(body.title || existing.title || "").trim(),
+    description: String(body.description || existing.description || "").trim(),
+    provider: {
+      type: body.provider?.type || existing.provider?.type,
+      name: body.provider?.name || existing.provider?.name,
+      website: body.provider?.website || existing.provider?.website
+    },
+    amount: Number(body.amount ?? existing.amount ?? 0),
+    benefits: body.benefits || existing.benefits,
+    eligibility: body.eligibility || existing.eligibility || {},
+    documentsRequired: sanitizeStringList(body.documentsRequired ?? existing.documentsRequired),
+    commonMistakes: sanitizeStringList(body.commonMistakes ?? existing.commonMistakes),
+    applicationProcess: {
+      mode: body.applicationProcess?.mode || existing.applicationProcess?.mode,
+      applyLink: body.applicationProcess?.applyLink || existing.applicationProcess?.applyLink,
+      steps: sanitizeStringList(body.applicationProcess?.steps ?? existing.applicationProcess?.steps)
+    },
+    deadline: body.deadline || existing.deadline
+  };
+}
+
 export const createScholarship = async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      provider,
-      amount,
-      eligibility,
-      documentsRequired,
-      applicationProcess,
-      deadline
-    } = req.body;
+    const payload = normalizeScholarshipPayload(req.body);
 
-    // 🔹 Required fields validation
-    if (!title || !description || !amount || !deadline) {
+    if (!payload.title || !payload.description || !payload.amount || !payload.deadline) {
       return res.status(400).json({
         msg: "Title, description, amount and deadline are required"
       });
     }
 
-    // 🔹 Provider validation
-    if (!provider || !provider.type) {
+    if (!payload.provider?.type) {
       return res.status(400).json({
         msg: "Provider type is required"
       });
     }
 
-    // 🔹 Deadline validation
-    if (new Date(deadline) < new Date()) {
+    if (new Date(payload.deadline) < new Date()) {
       return res.status(400).json({
         msg: "Deadline must be a future date"
       });
     }
 
+    if (!isValidExternalUrl(payload.applicationProcess?.applyLink)) {
+      return res.status(400).json({
+        msg: "A valid official application link is required (http/https)."
+      });
+    }
+
     const scholarship = await Scholarship.create({
-      title,
-      description,
-      provider,
-      amount,
-      eligibility,
-      documentsRequired,
-      applicationProcess,
-      deadline,
+      ...payload,
       status: "PENDING",
       createdBy: req.user.id
     });
@@ -65,9 +93,6 @@ export const createScholarship = async (req, res) => {
   }
 };
 
-/* ===========================
-   MODERATOR: VIEW OWN SCHOLARSHIPS
-=========================== */
 export const getMyScholarships = async (req, res) => {
   try {
     const data = await Scholarship.find({
@@ -81,50 +106,39 @@ export const getMyScholarships = async (req, res) => {
   }
 };
 
-/* ===========================
-   MODERATOR: EDIT OWN SCHOLARSHIP (only PENDING, not VERIFIED)
-=========================== */
 export const updateScholarship = async (req, res) => {
   try {
     const { id } = req.params;
     const scholarship = await Scholarship.findById(id);
     if (!scholarship) return res.status(404).json({ msg: "Scholarship not found" });
-    if (scholarship.createdBy.toString() !== req.user.id)
+    if (scholarship.createdBy.toString() !== req.user.id) {
       return res.status(403).json({ msg: "Not your scholarship" });
-    if (scholarship.status !== "PENDING")
+    }
+    if (scholarship.status !== "PENDING") {
       return res.status(400).json({ msg: "Can only edit PENDING scholarships" });
-    if (scholarship.verificationStatus === "VERIFIED")
+    }
+    if (scholarship.verificationStatus === "VERIFIED") {
       return res.status(400).json({ msg: "Cannot edit verified scholarship" });
+    }
 
-    const {
-      title,
-      description,
-      provider,
-      amount,
-      eligibility,
-      documentsRequired,
-      applicationProcess,
-      deadline
-    } = req.body;
+    const payload = normalizeScholarshipPayload(req.body, scholarship.toObject());
 
-    if (!title || !description || !amount || !deadline) {
+    if (!payload.title || !payload.description || !payload.amount || !payload.deadline) {
       return res.status(400).json({ msg: "Title, description, amount and deadline are required" });
     }
-    if (new Date(deadline) < new Date()) {
+    if (new Date(payload.deadline) < new Date()) {
       return res.status(400).json({ msg: "Deadline must be a future date" });
+    }
+    if (!isValidExternalUrl(payload.applicationProcess?.applyLink)) {
+      return res.status(400).json({
+        msg: "A valid official application link is required (http/https)."
+      });
     }
 
     const updated = await Scholarship.findByIdAndUpdate(
       id,
       {
-        title,
-        description,
-        provider: provider || scholarship.provider,
-        amount,
-        eligibility: eligibility || scholarship.eligibility,
-        documentsRequired: documentsRequired ?? scholarship.documentsRequired,
-        applicationProcess: applicationProcess || scholarship.applicationProcess,
-        deadline,
+        ...payload,
         status: "PENDING"
       },
       { new: true }
@@ -137,18 +151,17 @@ export const updateScholarship = async (req, res) => {
   }
 };
 
-/* ===========================
-   MODERATOR: WITHDRAW SCHOLARSHIP (before admin review)
-=========================== */
 export const deleteScholarship = async (req, res) => {
   try {
     const { id } = req.params;
     const scholarship = await Scholarship.findById(id);
     if (!scholarship) return res.status(404).json({ msg: "Scholarship not found" });
-    if (scholarship.createdBy.toString() !== req.user.id)
+    if (scholarship.createdBy.toString() !== req.user.id) {
       return res.status(403).json({ msg: "Not your scholarship" });
-    if (scholarship.status !== "PENDING")
+    }
+    if (scholarship.status !== "PENDING") {
       return res.status(400).json({ msg: "Can only withdraw PENDING scholarships" });
+    }
 
     await Scholarship.findByIdAndDelete(id);
     res.json({ msg: "Scholarship withdrawn" });
@@ -158,9 +171,6 @@ export const deleteScholarship = async (req, res) => {
   }
 };
 
-/* ===========================
-   MODERATOR: ASSISTANCE (only for scholarships they created)
-=========================== */
 export const getAssistanceRequests = async (req, res) => {
   try {
     const { status } = req.query;
@@ -179,6 +189,50 @@ export const getAssistanceRequests = async (req, res) => {
   }
 };
 
+export const getAssistanceRequestDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const request = await AssistanceRequest.findById(id)
+      .populate("studentId", "name email")
+      .populate("scholarshipId", "title deadline amount documentsRequired commonMistakes applicationProcess");
+
+    if (!request) return res.status(404).json({ msg: "Assistance request not found" });
+    if (request.moderatorId.toString() !== req.user.id) {
+      return res.status(403).json({ msg: "Not your assistance request" });
+    }
+
+    const [studentProfile, application] = await Promise.all([
+      UserProfile.findOne({ userId: request.studentId._id }).lean(),
+      Application.findOne({
+        studentId: request.studentId._id,
+        scholarshipId: request.scholarshipId._id
+      }).lean()
+    ]);
+
+    const documents = await Document.find({
+      userId: request.studentId._id,
+      scholarshipId: request.scholarshipId._id
+    })
+      .select(
+        "_id documentType fileUrl fileName mimeType sizeBytes status reviewComment rejectionReason createdAt updatedAt"
+      )
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({
+      assistanceRequest: request,
+      studentProfile,
+      application,
+      documents,
+      disclaimer:
+        "Document review is guidance-only. Final submission and verification happens on official scholarship portals."
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Failed to fetch assistance request details" });
+  }
+};
+
 export const replyToAssistance = async (req, res) => {
   try {
     const { id } = req.params;
@@ -187,10 +241,12 @@ export const replyToAssistance = async (req, res) => {
 
     const ar = await AssistanceRequest.findById(id);
     if (!ar) return res.status(404).json({ msg: "Assistance request not found" });
-    if (ar.moderatorId.toString() !== req.user.id)
+    if (ar.moderatorId.toString() !== req.user.id) {
       return res.status(403).json({ msg: "Not your assistance request" });
-    if (ar.status === "RESOLVED")
+    }
+    if (ar.status === "RESOLVED") {
       return res.status(400).json({ msg: "Request already resolved" });
+    }
 
     ar.messages.push({
       from: "MODERATOR",
@@ -213,8 +269,9 @@ export const resolveAssistance = async (req, res) => {
     const { id } = req.params;
     const ar = await AssistanceRequest.findById(id);
     if (!ar) return res.status(404).json({ msg: "Assistance request not found" });
-    if (ar.moderatorId.toString() !== req.user.id)
+    if (ar.moderatorId.toString() !== req.user.id) {
       return res.status(403).json({ msg: "Not your assistance request" });
+    }
 
     ar.status = "RESOLVED";
     ar.updatedAt = new Date();
@@ -227,16 +284,14 @@ export const resolveAssistance = async (req, res) => {
   }
 };
 
-/* ===========================
-   MODERATOR: APPLICATION PROGRESS (read-only, for scholarships they created)
-=========================== */
 export const getScholarshipApplications = async (req, res) => {
   try {
     const { id } = req.params;
     const scholarship = await Scholarship.findById(id);
     if (!scholarship) return res.status(404).json({ msg: "Scholarship not found" });
-    if (scholarship.createdBy.toString() !== req.user.id)
+    if (scholarship.createdBy.toString() !== req.user.id) {
       return res.status(403).json({ msg: "Not your scholarship" });
+    }
 
     const applications = await Application.find({ scholarshipId: id })
       .populate("studentId", "name email")

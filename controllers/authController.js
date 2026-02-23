@@ -1,93 +1,88 @@
-import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import User from "../models/User.js";
 
-/* ======================
-   STUDENT SIGNUP
-====================== */
+function buildAuthPayload(user) {
+  return {
+    id: user._id,
+    role: user.role
+  };
+}
+
 export const signup = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // 1️⃣ Basic validation
     if (!name || !email || !password) {
-      return res.status(400).json({ msg: "All fields required" });
+      return res.status(400).json({ msg: "Name, email and password are required" });
     }
 
-    // 2️⃣ Strong password check
     if (password.length < 8) {
-      return res.status(400).json({
-        msg: "Password must be at least 8 characters"
-      });
+      return res.status(400).json({ msg: "Password must be at least 8 characters" });
     }
 
-    // 3️⃣ Prevent duplicate email
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
     if (existingUser) {
       return res.status(409).json({ msg: "Email already registered" });
     }
 
-    // 4️⃣ Hash password
-    const hash = await bcrypt.hash(password, 12);
-
-    await User.create({
-      name,
-      email,
-      password: hash,
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const user = await User.create({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
       role: "STUDENT"
     });
 
-    res.status(201).json({ msg: "Student registered successfully" });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Signup failed" });
+    res.status(201).json({
+      msg: "Student registered successfully",
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ msg: "Signup failed", error: error.message });
   }
 };
 
-/* ======================
-   LOGIN (FIXED)
-====================== */
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    const invalidMsg = "Invalid email or password";
+    const invalidMessage = "Invalid email or password";
 
     if (!email || !password) {
-      return res.status(400).json({ msg: invalidMsg });
+      return res.status(400).json({ msg: invalidMessage });
     }
 
-    const user = await User.findOne({ email }).select("+password");
+    const user = await User.findOne({ email: email.toLowerCase().trim() }).select("+password");
     if (!user) {
-      return res.status(401).json({ msg: invalidMsg });
+      return res.status(401).json({ msg: invalidMessage });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ msg: invalidMsg });
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      return res.status(401).json({ msg: invalidMessage });
     }
 
-    // 🔥 FIXED JWT PAYLOAD
-    const token = jwt.sign(
-      {
-        id: user._id,        // ✅ WAS uid → NOW id
-        role: user.role     // ✅ REQUIRED for RBAC
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "24h",
-        issuer: "TFC-04"
-      }
-    );
+    const token = jwt.sign(buildAuthPayload(user), process.env.JWT_SECRET, {
+      expiresIn: "24h",
+      issuer: "ScholarLink"
+    });
 
     res.json({
       token,
-      role: user.role
+      role: user.role,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
     });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Login failed" });
+  } catch (error) {
+    res.status(500).json({ msg: "Login failed", error: error.message });
   }
 };
