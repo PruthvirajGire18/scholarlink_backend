@@ -14,12 +14,14 @@ import {
   getFraudAlerts,
   getPendingDocuments,
   getPendingScholarships,
+  getScholarshipFeedback,
   getStudentProfileForAdmin,
   getVerificationQueue,
   markFraudAlertReviewed,
   reviewDocument,
   reviewScholarship,
   sendStudentReminder,
+  updateScholarshipFeedbackStatus,
   updateApplicationStatus,
   verifyScholarship
 } from "../controllers/adminController.js";
@@ -48,7 +50,9 @@ router.put("/schoolerships/:id", roleMiddleware("ADMIN"), reviewScholarship);
 
 router.get("/scholarships", roleMiddleware("ADMIN"), getAllScholarships);
 router.get("/scholarships/pending", roleMiddleware("ADMIN"), getPendingScholarships);
+router.get("/scholarships/feedback", roleMiddleware("ADMIN"), getScholarshipFeedback);
 router.put("/scholarships/:id/review", roleMiddleware("ADMIN"), reviewScholarship);
+router.patch("/scholarships/feedback/:id", roleMiddleware("ADMIN"), updateScholarshipFeedbackStatus);
 
 router.get("/scholarships/verification-queue", allowRoles(["ADMIN", "MODERATOR"]), getVerificationQueue);
 router.put("/scholarships/:id/verify", allowRoles(["ADMIN", "MODERATOR"]), verifyScholarship);

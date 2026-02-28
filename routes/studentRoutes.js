@@ -10,6 +10,7 @@ import {
   getMyProfile,
   getRecommendedScholarships,
   replyToMyAssistanceRequest,
+  submitScholarshipDataFeedback,
   getScholarshipById,
   getScholarshipDiscovery,
   getStudentDashboard,
@@ -37,6 +38,7 @@ router.get("/scholarships/recommended", getRecommendedScholarships);
 router.get("/scholarships/discover", getScholarshipDiscovery);
 router.get("/scholarships", getApprovedScholarships);
 router.get("/scholarships/:id", getScholarshipById);
+router.post("/scholarships/:id/feedback", submitScholarshipDataFeedback);
 
 router.post("/applications/:scholarshipId/start", startScholarshipApplication);
 router.get("/applications", getMyApplications);

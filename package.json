@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "seed:demo": "node data/seedDemo.js"
+    "seed:demo": "node data/seedDemo.js",
+    "ingest:once": "node data/runIngestionOnce.js"
   },
   "keywords": [],
   "author": "",

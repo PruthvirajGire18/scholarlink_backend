@@ -52,6 +52,10 @@ const scholarshipSchema = new mongoose.Schema(
 
     /* ELIGIBILITY */
     eligibility: {
+      summary: {
+        type: String
+      },
+
       minMarks: {
         type: Number // percentage
       },
@@ -159,7 +163,18 @@ const scholarshipSchema = new mongoose.Schema(
       }
     ],
 
-    flagReason: { type: String }
+    flagReason: { type: String },
+
+    /* INGESTION SOURCE METADATA */
+    source: {
+      provider: { type: String, trim: true },
+      adapter: { type: String, trim: true },
+      externalId: { type: String, trim: true },
+      dedupeKey: { type: String, trim: true },
+      sourceUrl: { type: String, trim: true }
+    },
+
+    lastSyncedAt: { type: Date }
   },
   { timestamps: true }
 );
@@ -167,5 +182,13 @@ const scholarshipSchema = new mongoose.Schema(
 scholarshipSchema.index({ status: 1, isActive: 1, deadline: 1 });
 scholarshipSchema.index({ title: "text", description: "text", tags: "text" });
 scholarshipSchema.index({ "provider.type": 1 });
+scholarshipSchema.index(
+  { "source.provider": 1, "source.externalId": 1 },
+  { unique: true, sparse: true }
+);
+scholarshipSchema.index(
+  { "source.provider": 1, "source.dedupeKey": 1 },
+  { unique: true, sparse: true }
+);
 
 export default mongoose.model("Scholarship", scholarshipSchema);

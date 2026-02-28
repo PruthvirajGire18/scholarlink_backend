@@ -6,6 +6,7 @@ import Document from "../models/Document.js";
 import FraudAlert from "../models/FraudAlert.js";
 import Notification from "../models/Notification.js";
 import Scholarship from "../models/Scholarship.js";
+import ScholarshipFeedback from "../models/ScholarshipFeedback.js";
 import User from "../models/User.js";
 import UserProfile from "../models/UserProfile.js";
 import { calculateProgress, deriveStatus, updateChecklistItem } from "../utils/applicationProgress.js";
@@ -13,6 +14,233 @@ import { createAuditLog, getClientMeta } from "../utils/auditHelper.js";
 import { calculateRiskScore } from "../utils/riskScore.js";
 
 const APPLICATION_DECISION_STATUSES = new Set(["PENDING", "APPROVED", "REJECTED"]);
+const PROVIDER_TYPES = new Set(["GOVERNMENT", "NGO", "CSR", "PRIVATE"]);
+const APPLICATION_MODES = new Set(["ONLINE", "OFFLINE", "BOTH"]);
+const ELIGIBILITY_GENDERS = new Set(["MALE", "FEMALE", "ANY"]);
+const EDUCATION_LEVELS = new Set(["DIPLOMA", "UG", "PG", "PHD"]);
+const CATEGORY_VALUES = new Set(["OPEN", "OBC", "SC", "ST", "VJNT", "EWS", "SEBC"]);
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
+}
+
+function asText(value, fallback = "") {
+  if (value === null || value === undefined) return String(fallback || "").trim();
+  return String(value).trim();
+}
+
+function isValidExternalUrl(value) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeStringList(value) {
+  if (!value) return [];
+  const rawList = Array.isArray(value) ? value : [value];
+  return rawList
+    .flatMap((item) => String(item || "").split(/\n|,|;|\/|\|/g))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toNumberOrUndefined(value) {
+  if (value === null || value === undefined || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed;
+}
+
+function normalizeProvider(input = {}, existing = {}) {
+  const typeInput = asText(input.type || existing.type || "").toUpperCase();
+  const type = PROVIDER_TYPES.has(typeInput) ? typeInput : existing.type;
+  return {
+    type,
+    name: asText(hasOwn(input, "name") ? input.name : existing.name),
+    website: asText(hasOwn(input, "website") ? input.website : existing.website)
+  };
+}
+
+function normalizeEligibility(input = {}, existing = {}) {
+  const categoriesRaw = sanitizeStringList(
+    hasOwn(input, "categories") ? input.categories : existing.categories
+  )
+    .map((item) => (item.toUpperCase() === "GENERAL" ? "OPEN" : item.toUpperCase()))
+    .filter((item) => CATEGORY_VALUES.has(item));
+
+  const statesAllowed = sanitizeStringList(
+    hasOwn(input, "statesAllowed") ? input.statesAllowed : existing.statesAllowed
+  );
+
+  const minMarks = toNumberOrUndefined(
+    hasOwn(input, "minMarks") ? input.minMarks : existing.minMarks
+  );
+  const maxIncome = toNumberOrUndefined(
+    hasOwn(input, "maxIncome") ? input.maxIncome : existing.maxIncome
+  );
+
+  const genderInput = asText(hasOwn(input, "gender") ? input.gender : existing.gender).toUpperCase();
+  const educationInput = asText(
+    hasOwn(input, "educationLevel") ? input.educationLevel : existing.educationLevel
+  ).toUpperCase();
+  const summary = asText(hasOwn(input, "summary") ? input.summary : existing.summary);
+
+  return {
+    summary,
+    minMarks,
+    maxIncome,
+    categories: categoriesRaw,
+    gender: ELIGIBILITY_GENDERS.has(genderInput) ? genderInput : existing.gender || "ANY",
+    statesAllowed,
+    educationLevel: EDUCATION_LEVELS.has(educationInput) ? educationInput : undefined
+  };
+}
+
+function normalizeApplicationProcess(input = {}, existing = {}) {
+  const modeInput = asText(hasOwn(input, "mode") ? input.mode : existing.mode).toUpperCase();
+  const mode = APPLICATION_MODES.has(modeInput) ? modeInput : existing.mode || "ONLINE";
+
+  const applyLinkInput = asText(
+    hasOwn(input, "applyLink") ? input.applyLink : existing.applyLink
+  );
+  const applyLink = isValidExternalUrl(applyLinkInput) ? applyLinkInput : "";
+
+  return {
+    mode,
+    applyLink: applyLink || undefined,
+    steps: sanitizeStringList(hasOwn(input, "steps") ? input.steps : existing.steps)
+  };
+}
+
+function buildAdminEnrichmentPatch(existingDoc, enrichment = {}) {
+  const existing = existingDoc?.toObject ? existingDoc.toObject() : existingDoc || {};
+  const patch = {};
+
+  if (hasOwn(enrichment, "title")) patch.title = asText(enrichment.title, existing.title);
+  if (hasOwn(enrichment, "description")) {
+    patch.description = asText(enrichment.description, existing.description);
+  }
+  if (hasOwn(enrichment, "benefits")) patch.benefits = asText(enrichment.benefits, existing.benefits);
+  if (hasOwn(enrichment, "tags")) patch.tags = sanitizeStringList(enrichment.tags);
+
+  if (hasOwn(enrichment, "amount")) {
+    const amount = toNumberOrUndefined(enrichment.amount);
+    if (amount !== undefined && amount > 0) patch.amount = amount;
+  }
+
+  if (hasOwn(enrichment, "deadline")) {
+    const parsedDeadline = new Date(enrichment.deadline);
+    if (!Number.isNaN(parsedDeadline.getTime())) patch.deadline = parsedDeadline;
+  }
+
+  if (hasOwn(enrichment, "provider")) {
+    patch.provider = normalizeProvider(enrichment.provider || {}, existing.provider || {});
+  }
+
+  if (hasOwn(enrichment, "eligibility")) {
+    patch.eligibility = normalizeEligibility(enrichment.eligibility || {}, existing.eligibility || {});
+  }
+
+  if (hasOwn(enrichment, "documentsRequired")) {
+    patch.documentsRequired = sanitizeStringList(enrichment.documentsRequired);
+  }
+
+  if (hasOwn(enrichment, "commonMistakes")) {
+    patch.commonMistakes = sanitizeStringList(enrichment.commonMistakes);
+  }
+
+  if (hasOwn(enrichment, "applicationProcess")) {
+    patch.applicationProcess = normalizeApplicationProcess(
+      enrichment.applicationProcess || {},
+      existing.applicationProcess || {}
+    );
+  }
+
+  return patch;
+}
+
+function validateApprovalReady(scholarship) {
+  const missing = [];
+  const applyLink = scholarship?.applicationProcess?.applyLink;
+  const docs = sanitizeStringList(scholarship?.documentsRequired);
+  const steps = sanitizeStringList(scholarship?.applicationProcess?.steps);
+  const mistakes = sanitizeStringList(scholarship?.commonMistakes);
+  const eligibility = scholarship?.eligibility || {};
+  const eligibilitySummary = asText(eligibility.summary);
+
+  const hasEligibilityDetails =
+    Boolean(eligibilitySummary) ||
+    (eligibility.minMarks !== undefined &&
+    eligibility.minMarks !== null
+      ? true
+      : eligibility.maxIncome !== undefined && eligibility.maxIncome !== null
+        ? true
+        : Array.isArray(eligibility.categories) && eligibility.categories.length > 0
+          ? true
+          : Array.isArray(eligibility.statesAllowed) && eligibility.statesAllowed.length > 0
+            ? true
+            : Boolean(eligibility.educationLevel));
+
+  if (!isValidExternalUrl(applyLink)) missing.push("official apply link");
+  if (docs.length === 0) missing.push("documents required");
+  if (steps.length === 0) missing.push("application steps");
+  if (mistakes.length === 0) missing.push("common mistakes");
+  if (!hasEligibilityDetails) missing.push("eligibility details");
+
+  return missing;
+}
+
+function applyApprovalFallbacks(scholarship) {
+  if (!scholarship) return;
+
+  const docs = sanitizeStringList(scholarship.documentsRequired);
+  if (docs.length === 0) {
+    scholarship.documentsRequired = [
+      "Refer to official portal document checklist (Aadhaar, income proof, marksheet, caste/category certificate if applicable)."
+    ];
+  }
+
+  const steps = sanitizeStringList(scholarship?.applicationProcess?.steps);
+  if (steps.length === 0) {
+    scholarship.applicationProcess = {
+      ...(scholarship.applicationProcess || {}),
+      steps: [
+        "Open the official application portal from the link above.",
+        "Read scheme instructions and fill the application form carefully.",
+        "Upload required documents and submit before the deadline."
+      ]
+    };
+  }
+
+  const mistakes = sanitizeStringList(scholarship.commonMistakes);
+  if (mistakes.length === 0) {
+    scholarship.commonMistakes = [
+      "Do not submit without verifying eligibility and required documents from the official notification."
+    ];
+  }
+
+  const eligibility = scholarship.eligibility || {};
+  const summary = asText(eligibility.summary);
+  const hasEligibilityDetails =
+    Boolean(summary) ||
+    eligibility.minMarks !== undefined ||
+    eligibility.maxIncome !== undefined ||
+    (Array.isArray(eligibility.categories) && eligibility.categories.length > 0) ||
+    (Array.isArray(eligibility.statesAllowed) && eligibility.statesAllowed.length > 0) ||
+    Boolean(eligibility.educationLevel);
+
+  if (!hasEligibilityDetails) {
+    scholarship.eligibility = {
+      ...eligibility,
+      summary:
+        "Detailed eligibility is available on the official portal. Verify category, income, education, and other conditions before applying."
+    };
+  }
+}
 
 export const createModerator = async (req, res) => {
   try {
@@ -96,7 +324,10 @@ export const getAllStudents = async (req, res) => {
 
 export const getPendingScholarships = async (req, res) => {
   try {
-    const data = await Scholarship.find({ status: "PENDING" }).populate("createdBy", "name email");
+    const data = await Scholarship.find({ status: "PENDING", isActive: true }).populate(
+      "createdBy",
+      "name email"
+    );
     res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -105,19 +336,52 @@ export const getPendingScholarships = async (req, res) => {
 
 export const reviewScholarship = async (req, res) => {
   try {
-    const { status, remarks } = req.body;
+    const { status, remarks, enrichment, feedbackIds = [] } = req.body;
     if (!["APPROVED", "REJECTED"].includes(status)) {
       return res.status(400).json({ message: "status must be APPROVED or REJECTED" });
     }
 
-    const before = await Scholarship.findById(req.params.id).lean();
-    if (!before) return res.status(404).json({ message: "Scholarship not found" });
+    const scholarship = await Scholarship.findById(req.params.id);
+    if (!scholarship) return res.status(404).json({ message: "Scholarship not found" });
+    const before = scholarship.toObject();
 
-    const scholarship = await Scholarship.findByIdAndUpdate(
-      req.params.id,
-      { status, reviewRemarks: remarks || "", reviewedBy: req.user.id },
-      { new: true }
-    );
+    if (enrichment && typeof enrichment === "object") {
+      const patch = buildAdminEnrichmentPatch(scholarship, enrichment);
+      Object.assign(scholarship, patch);
+    }
+
+    scholarship.status = status;
+    scholarship.reviewRemarks = remarks || "";
+    scholarship.reviewedBy = req.user.id;
+
+    if (status === "APPROVED") {
+      applyApprovalFallbacks(scholarship);
+      const missing = validateApprovalReady(scholarship);
+      if (missing.length > 0) {
+        return res.status(400).json({
+          message: `Before approval please complete: ${missing.join(", ")}`
+        });
+      }
+    }
+
+    await scholarship.save();
+
+    if (Array.isArray(feedbackIds) && feedbackIds.length > 0) {
+      await ScholarshipFeedback.updateMany(
+        {
+          _id: { $in: feedbackIds },
+          scholarshipId: scholarship._id
+        },
+        {
+          $set: {
+            status: status === "APPROVED" ? "RESOLVED" : "REVIEWED",
+            adminComment: scholarship.reviewRemarks || "",
+            reviewedBy: req.user.id,
+            reviewedAt: new Date()
+          }
+        }
+      );
+    }
 
     await createAuditLog({
       actorId: req.user.id,
@@ -125,12 +389,79 @@ export const reviewScholarship = async (req, res) => {
       actionType: status === "APPROVED" ? "APPROVE_SCHOLARSHIP" : "REJECT_SCHOLARSHIP",
       entityType: "SCHOLARSHIP",
       entityId: scholarship._id,
-      beforeState: { status: before.status },
-      afterState: { status: scholarship.status, reviewRemarks: scholarship.reviewRemarks },
+      beforeState: {
+        status: before.status,
+        applicationProcess: before.applicationProcess,
+        eligibility: before.eligibility,
+        documentsRequired: before.documentsRequired,
+        commonMistakes: before.commonMistakes
+      },
+      afterState: {
+        status: scholarship.status,
+        reviewRemarks: scholarship.reviewRemarks,
+        applicationProcess: scholarship.applicationProcess,
+        eligibility: scholarship.eligibility,
+        documentsRequired: scholarship.documentsRequired,
+        commonMistakes: scholarship.commonMistakes
+      },
       ...getClientMeta(req)
     });
 
     res.json({ message: `Scholarship ${status.toLowerCase()}`, scholarship });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getScholarshipFeedback = async (req, res) => {
+  try {
+    const status = String(req.query.status || "OPEN").toUpperCase();
+    const limit = Math.max(1, Math.min(Number(req.query.limit || 200), 500));
+    const allowedStatuses = new Set(["OPEN", "REVIEWED", "RESOLVED"]);
+    const filter = {};
+    if (allowedStatuses.has(status)) filter.status = status;
+
+    const list = await ScholarshipFeedback.find(filter)
+      .populate(
+        "scholarshipId",
+        "title description provider amount benefits eligibility documentsRequired commonMistakes applicationProcess deadline status verificationStatus source createdAt"
+      )
+      .populate("studentId", "name email")
+      .populate("reviewedBy", "name email")
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json(list);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const updateScholarshipFeedbackStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, adminComment } = req.body;
+    if (!["OPEN", "REVIEWED", "RESOLVED"].includes(String(status || "").toUpperCase())) {
+      return res.status(400).json({ message: "status must be OPEN, REVIEWED, or RESOLVED" });
+    }
+
+    const feedback = await ScholarshipFeedback.findById(id);
+    if (!feedback) return res.status(404).json({ message: "Feedback not found" });
+
+    feedback.status = String(status).toUpperCase();
+    feedback.adminComment = String(adminComment || "").trim();
+    feedback.reviewedBy = req.user.id;
+    feedback.reviewedAt = new Date();
+    await feedback.save();
+
+    const populated = await ScholarshipFeedback.findById(feedback._id)
+      .populate("scholarshipId", "title status")
+      .populate("studentId", "name email")
+      .populate("reviewedBy", "name email")
+      .lean();
+
+    res.json({ message: "Feedback status updated", feedback: populated });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -163,6 +494,7 @@ export const getVerificationQueue = async (req, res) => {
   try {
     const list = await Scholarship.find({
       status: "PENDING",
+      isActive: true,
       $or: [{ verificationStatus: "UNVERIFIED" }, { verificationStatus: { $exists: false } }]
     })
       .populate("createdBy", "name email")

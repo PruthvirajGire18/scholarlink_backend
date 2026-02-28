@@ -5,6 +5,8 @@ import AssistanceRequest from "../models/AssistanceRequest.js";
 import Document from "../models/Document.js";
 import Notification from "../models/Notification.js";
 import Scholarship from "../models/Scholarship.js";
+import ScholarshipFeedback from "../models/ScholarshipFeedback.js";
+import User from "../models/User.js";
 import UserProfile from "../models/UserProfile.js";
 import { uploadBufferToCloudinary } from "../config/cloudinary.js";
 import {
@@ -17,6 +19,10 @@ import {
   updateChecklistItem
 } from "../utils/applicationProgress.js";
 import { evaluateEligibility, recommendScholarships } from "../utils/eligibilityEngine.js";
+import {
+  calculateScholarshipDataCompleteness,
+  withScholarshipDataCompleteness
+} from "../utils/dataCompleteness.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const APPLICATION_POPULATE_FIELDS =
@@ -93,6 +99,13 @@ async function ensureNotification({ userId, type, title, message, data = {} }) {
 function syncDocumentsRoadmapStep(application) {
   const allUploaded = (application.documentChecklist || []).every((item) => !item.isRequired || item.isUploaded);
   application.roadmapSteps = markStep(application.roadmapSteps, "documents", allUploaded);
+}
+
+function decorateRecommendationList(list = []) {
+  return list.map((item) => ({
+    ...item,
+    scholarship: withScholarshipDataCompleteness(item.scholarship)
+  }));
 }
 
 async function getStudentProfile(studentId) {
@@ -254,9 +267,11 @@ export const getStudentDashboard = async (req, res) => {
         pendingReview: applications.filter((app) => app.status === "PENDING" || app.status === "APPLIED").length,
         approvedCount: applications.filter((app) => app.status === "APPROVED").length
       },
-      recommendedScholarships: recommendations.eligible.slice(0, 8),
-      partiallyEligibleScholarships: recommendations.partiallyEligible.slice(0, 8),
-      nearMissScholarships: recommendations.nearMisses.slice(0, 5),
+      recommendedScholarships: decorateRecommendationList(recommendations.eligible.slice(0, 8)),
+      partiallyEligibleScholarships: decorateRecommendationList(
+        recommendations.partiallyEligible.slice(0, 8)
+      ),
+      nearMissScholarships: decorateRecommendationList(recommendations.nearMisses.slice(0, 5)),
       upcomingDeadlines,
       applications,
       notifications,
@@ -277,7 +292,11 @@ export const getRecommendedScholarships = async (req, res) => {
     }).sort({ deadline: 1 });
 
     const recommendations = recommendScholarships(profile, scholarships);
-    res.json(recommendations);
+    res.json({
+      eligible: decorateRecommendationList(recommendations.eligible),
+      partiallyEligible: decorateRecommendationList(recommendations.partiallyEligible),
+      nearMisses: decorateRecommendationList(recommendations.nearMisses)
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch recommendations", error: error.message });
   }
@@ -291,7 +310,7 @@ export const getScholarshipDiscovery = async (req, res) => {
     const enriched = scholarships.map((scholarship) => {
       const eligibility = evaluateEligibility(profile, scholarship);
       return {
-        scholarship,
+        scholarship: withScholarshipDataCompleteness(scholarship),
         ...eligibility
       };
     });
@@ -310,7 +329,7 @@ export const getApprovedScholarships = async (req, res) => {
       deadline: { $gte: new Date() }
     }).sort({ deadline: 1 });
 
-    res.json(data);
+    res.json(data.map((item) => withScholarshipDataCompleteness(item)));
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch scholarships", error: error.message });
   }
@@ -329,8 +348,9 @@ export const getScholarshipById = async (req, res) => {
     const profile = await getStudentProfile(req.user.id);
     const eligibility = evaluateEligibility(profile, scholarship);
 
+    const scholarshipWithCompleteness = withScholarshipDataCompleteness(scholarship);
     res.json({
-      ...scholarship.toObject(),
+      ...scholarshipWithCompleteness,
       eligibilityCheck: eligibility,
       disclaimer:
         "Final submission and verification happens on official government/NGO portals only."
@@ -805,6 +825,78 @@ export const replyToMyAssistanceRequest = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+export const submitScholarshipDataFeedback = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const scholarship = await Scholarship.findById(id);
+    if (!scholarship || scholarship.status !== "APPROVED" || !scholarship.isActive) {
+      return res.status(404).json({ message: "Scholarship not available" });
+    }
+
+    const existingOpen = await ScholarshipFeedback.findOne({
+      scholarshipId: scholarship._id,
+      studentId: req.user.id,
+      status: "OPEN"
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (existingOpen) {
+      return res.json({
+        message: "You already have an open feedback request for this scholarship.",
+        feedback: existingOpen
+      });
+    }
+
+    const completeness = calculateScholarshipDataCompleteness(scholarship);
+    const incomingMessage = String(req.body?.message || "").trim();
+    const message =
+      incomingMessage ||
+      `Data completeness is ${completeness.score}%. Missing: ${
+        completeness.missingFields.join(", ") || "details"
+      }.`;
+
+    const feedback = await ScholarshipFeedback.create({
+      scholarshipId: scholarship._id,
+      studentId: req.user.id,
+      message,
+      missingFields: Array.isArray(req.body?.missingFields) && req.body.missingFields.length > 0
+        ? req.body.missingFields.map((item) => String(item).trim()).filter(Boolean)
+        : completeness.missingFields,
+      dataCompletenessScore: completeness.score,
+      status: "OPEN"
+    });
+
+    const admins = await User.find({ role: "ADMIN" }).select("_id").lean();
+    if (admins.length > 0) {
+      const notifications = admins.map((admin) => ({
+        userId: admin._id,
+        type: "ADMIN_MESSAGE",
+        title: "Scholarship data feedback received",
+        message: `Student reported missing data for "${scholarship.title}" (completeness ${completeness.score}%).`,
+        data: {
+          scholarshipId: scholarship._id,
+          feedbackId: feedback._id,
+          signature: `scholarship-feedback-${feedback._id}`
+        }
+      }));
+      await Notification.insertMany(notifications);
+    }
+
+    const populated = await ScholarshipFeedback.findById(feedback._id)
+      .populate("scholarshipId", "title status")
+      .populate("studentId", "name email")
+      .lean();
+
+    res.status(201).json({
+      message: "Feedback submitted to admin for review.",
+      feedback: populated
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to submit scholarship feedback", error: error.message });
   }
 };
 

@@ -12,6 +12,8 @@ import adminRoutes from "./routes/adminRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import moderatorRoutes from "./routes/moderatorRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
+import ingestionRoutes from "./routes/ingestionRoutes.js";
+import { startScholarshipIngestionScheduler } from "./services/ingestion/ingestionScheduler.js";
 
 dotenv.config();
 
@@ -36,6 +38,7 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/moderator", moderatorRoutes);
 app.use("/api/student", studentRoutes);
+app.use("/api/ingestion", ingestionRoutes);
 
 app.get("/", (req, res) => {
   res.send("ScholarLink API running");
@@ -46,4 +49,5 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startScholarshipIngestionScheduler();
 });
