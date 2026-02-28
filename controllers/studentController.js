@@ -26,7 +26,7 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const APPLICATION_POPULATE_FIELDS =
-  "title deadline amount provider documentsRequired commonMistakes applicationProcess";
+  "title description benefits eligibility deadline amount provider documentsRequired commonMistakes applicationProcess";
 const STUDENT_TRACKABLE_STATUSES = new Set(["APPLIED", "PENDING", "APPROVED", "REJECTED"]);
 
 const DOCUMENT_PROFILE_FIELD_MAP = {
