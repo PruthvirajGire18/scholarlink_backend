@@ -13,6 +13,7 @@ import moderatorRoutes from "./routes/moderatorRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import ingestionRoutes from "./routes/ingestionRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
+import translateRoutes from "./routes/translate.js";
 import { startScholarshipIngestionScheduler } from "./services/ingestion/ingestionScheduler.js";
 
 dotenv.config();
@@ -66,6 +67,7 @@ app.use("/api/moderator", moderatorRoutes);
 app.use("/api/student", studentRoutes);
 app.use("/api/ingestion", ingestionRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/translate", translateRoutes);
 
 app.get("/", (req, res) => {
   res.send("ScholarLink API running");

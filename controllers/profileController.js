@@ -20,6 +20,9 @@ export const getAuthenticatedProfile = async (req, res) => {
     res.json({
       profile: {
         ...(profile || {}),
+        preferredLanguage: Array.isArray(profile?.preferredLanguages)
+          ? profile.preferredLanguages[0] || "en"
+          : "en",
         userId,
         name: user.name || "",
         email: user.email || "",

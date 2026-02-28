@@ -299,6 +299,12 @@ export const getMyProfile = async (req, res) => {
 
 export const upsertMyProfile = async (req, res) => {
   try {
+    const preferredFromBody = Array.isArray(req.body.preferredLanguages)
+      ? req.body.preferredLanguages
+      : req.body.preferredLanguage
+        ? [req.body.preferredLanguage]
+        : ["en", "hi", "mr"];
+
     const update = {
       gender: req.body.gender,
       dateOfBirth: req.body.dateOfBirth,
@@ -312,7 +318,7 @@ export const upsertMyProfile = async (req, res) => {
       bankDetails: req.body.bankDetails || {},
       financial: req.body.financial || {},
       social: req.body.social || {},
-      preferredLanguages: req.body.preferredLanguages || ["en", "hi", "mr"],
+      preferredLanguages: preferredFromBody,
       notificationPreferences: req.body.notificationPreferences || {}
     };
 
