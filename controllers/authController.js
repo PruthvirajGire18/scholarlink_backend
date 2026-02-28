@@ -2,11 +2,53 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 function buildAuthPayload(user) {
   return {
     id: user._id,
     role: user.role
   };
+}
+
+function getCookieDomain() {
+  const configuredDomain = String(process.env.AUTH_COOKIE_DOMAIN || "").trim();
+  return configuredDomain || undefined;
+}
+
+function buildAuthCookieOptions() {
+  const isProduction = process.env.NODE_ENV === "production";
+  const cookieOptions = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    path: "/",
+    maxAge: ONE_DAY_MS
+  };
+
+  const domain = getCookieDomain();
+  if (domain) {
+    cookieOptions.domain = domain;
+  }
+
+  return cookieOptions;
+}
+
+function buildClearCookieOptions() {
+  const isProduction = process.env.NODE_ENV === "production";
+  const cookieOptions = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    path: "/"
+  };
+
+  const domain = getCookieDomain();
+  if (domain) {
+    cookieOptions.domain = domain;
+  }
+
+  return cookieOptions;
 }
 
 export const signup = async (req, res) => {
@@ -72,6 +114,8 @@ export const login = async (req, res) => {
       issuer: "ScholarLink"
     });
 
+    res.cookie("token", token, buildAuthCookieOptions());
+
     res.json({
       token,
       role: user.role,
@@ -85,4 +129,9 @@ export const login = async (req, res) => {
   } catch (error) {
     res.status(500).json({ msg: "Login failed", error: error.message });
   }
+};
+
+export const logout = (req, res) => {
+  res.clearCookie("token", buildClearCookieOptions());
+  res.json({ msg: "Logged out successfully" });
 };
