@@ -20,6 +20,7 @@ import {
   toggleApplicationStep,
   updateMyApplicationStatus,
   uploadApplicationDocument,
+  uploadProfileDocument,
   upsertMyProfile
 } from "../controllers/studentController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
@@ -33,6 +34,7 @@ router.use(authMiddleware, roleMiddleware("STUDENT"));
 router.get("/dashboard", getStudentDashboard);
 router.get("/profile", getMyProfile);
 router.put("/profile", upsertMyProfile);
+router.post("/profile/documents", uploadDocument.single("file"), uploadProfileDocument);
 
 router.get("/scholarships/recommended", getRecommendedScholarships);
 router.get("/scholarships/discover", getScholarshipDiscovery);

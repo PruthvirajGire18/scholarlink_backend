@@ -30,44 +30,198 @@ const APPLICATION_POPULATE_FIELDS =
 const STUDENT_TRACKABLE_STATUSES = new Set(["APPLIED", "PENDING", "APPROVED", "REJECTED"]);
 
 const DOCUMENT_PROFILE_FIELD_MAP = {
-  AADHAAR: "documents.aadhaar",
-  INCOME_CERTIFICATE: "documents.incomeCertificate",
-  CASTE_CERTIFICATE: "documents.casteCertificate",
-  DOMICILE: "documents.domicileCertificate",
-  MARKSHEET: "documents.marksheet"
+  AADHAAR: "aadhaar",
+  INCOME_CERTIFICATE: "incomeCertificate",
+  CASTE_CERTIFICATE: "casteCertificate",
+  CASTE_VALIDITY_CERTIFICATE: "casteValidityCertificate",
+  NON_CREAMY_LAYER_CERTIFICATE: "nonCreamyLayerCertificate",
+  DOMICILE: "domicileCertificate",
+  MARKSHEET: "marksheet",
+  TRANSFER_CERTIFICATE: "transferCertificate",
+  GAP_CERTIFICATE: "gapCertificate",
+  BANK_PASSBOOK: "bankPassbook",
+  FEE_RECEIPT: "feeReceipt",
+  ADMISSION_LETTER: "admissionLetter",
+  BONAFIDE_CERTIFICATE: "bonafideCertificate",
+  DISABILITY_CERTIFICATE: "disabilityCertificate",
+  MINORITY_DECLARATION: "minorityDeclaration",
+  RATION_CARD: "rationCard",
+  SELF_DECLARATION: "selfDeclaration"
 };
 
+const PROFILE_DOCUMENT_KEYS = Object.values(DOCUMENT_PROFILE_FIELD_MAP);
+
 function getProfileDocumentFieldPath(documentType) {
+  const raw = String(documentType || "").trim();
+  if (!raw) return null;
+  if (PROFILE_DOCUMENT_KEYS.includes(raw)) return raw;
+
   const normalized = normalizeDocumentType(documentType);
-  if (normalized.includes("AADHAAR")) return DOCUMENT_PROFILE_FIELD_MAP.AADHAAR;
-  if (normalized.includes("INCOME_CERTIFICATE")) return DOCUMENT_PROFILE_FIELD_MAP.INCOME_CERTIFICATE;
-  if (normalized.includes("CASTE_CERTIFICATE")) return DOCUMENT_PROFILE_FIELD_MAP.CASTE_CERTIFICATE;
-  if (normalized.includes("DOMICILE")) return DOCUMENT_PROFILE_FIELD_MAP.DOMICILE;
-  if (normalized.includes("MARKSHEET") || normalized.includes("TRANSCRIPT")) {
+  const collapsed = normalized.replace(/_/g, "");
+
+  if (collapsed.includes("AADHAAR")) return DOCUMENT_PROFILE_FIELD_MAP.AADHAAR;
+  if (collapsed.includes("INCOMECERTIFICATE")) return DOCUMENT_PROFILE_FIELD_MAP.INCOME_CERTIFICATE;
+  if (collapsed.includes("CASTECERTIFICATE")) return DOCUMENT_PROFILE_FIELD_MAP.CASTE_CERTIFICATE;
+  if (collapsed.includes("CASTEVALIDITY")) return DOCUMENT_PROFILE_FIELD_MAP.CASTE_VALIDITY_CERTIFICATE;
+  if (collapsed.includes("NONCREAMY") || collapsed.includes("NCL")) {
+    return DOCUMENT_PROFILE_FIELD_MAP.NON_CREAMY_LAYER_CERTIFICATE;
+  }
+  if (collapsed.includes("DOMICILE")) return DOCUMENT_PROFILE_FIELD_MAP.DOMICILE;
+  if (collapsed.includes("MARKSHEET") || collapsed.includes("TRANSCRIPT")) {
     return DOCUMENT_PROFILE_FIELD_MAP.MARKSHEET;
+  }
+  if (collapsed.includes("TRANSFERCERTIFICATE") || collapsed.includes("LEAVINGCERTIFICATE")) {
+    return DOCUMENT_PROFILE_FIELD_MAP.TRANSFER_CERTIFICATE;
+  }
+  if (collapsed.includes("GAPCERTIFICATE")) return DOCUMENT_PROFILE_FIELD_MAP.GAP_CERTIFICATE;
+  if (collapsed.includes("PASSBOOK") || collapsed.includes("BANKBOOK")) {
+    return DOCUMENT_PROFILE_FIELD_MAP.BANK_PASSBOOK;
+  }
+  if (collapsed.includes("FEERECEIPT")) return DOCUMENT_PROFILE_FIELD_MAP.FEE_RECEIPT;
+  if (collapsed.includes("ADMISSIONLETTER") || collapsed.includes("ALLOTMENTLETTER")) {
+    return DOCUMENT_PROFILE_FIELD_MAP.ADMISSION_LETTER;
+  }
+  if (collapsed.includes("BONAFIDE")) return DOCUMENT_PROFILE_FIELD_MAP.BONAFIDE_CERTIFICATE;
+  if (collapsed.includes("DISABILITY")) return DOCUMENT_PROFILE_FIELD_MAP.DISABILITY_CERTIFICATE;
+  if (collapsed.includes("MINORITY")) return DOCUMENT_PROFILE_FIELD_MAP.MINORITY_DECLARATION;
+  if (collapsed.includes("RATIONCARD")) return DOCUMENT_PROFILE_FIELD_MAP.RATION_CARD;
+  if (collapsed.includes("SELFDECLARATION") || collapsed.includes("UNDERTAKING")) {
+    return DOCUMENT_PROFILE_FIELD_MAP.SELF_DECLARATION;
   }
   return DOCUMENT_PROFILE_FIELD_MAP[normalized] || null;
 }
 
-function calculateProfileCompletion(profile) {
-  const fields = [
-    profile.gender,
-    profile.dateOfBirth,
-    profile.mobile,
-    profile.address?.state,
-    profile.address?.district,
-    profile.address?.pincode,
-    profile.education?.course,
-    profile.education?.educationLevel,
-    profile.education?.institute,
-    profile.education?.currentYear,
-    profile.education?.percentage,
-    profile.category,
-    profile.annualIncome
-  ];
+function normalizeStoredDocumentMeta(value) {
+  if (value === true) {
+    return {
+      isUploaded: true,
+      fileUrl: "",
+      cloudinaryPublicId: "",
+      fileName: "",
+      mimeType: "",
+      sizeBytes: 0,
+      uploadedAt: null,
+      source: "MANUAL"
+    };
+  }
 
-  const filled = fields.filter((value) => value !== undefined && value !== null && value !== "").length;
-  return Math.round((filled / fields.length) * 100);
+  if (!value || typeof value !== "object") {
+    return {
+      isUploaded: false,
+      fileUrl: "",
+      cloudinaryPublicId: "",
+      fileName: "",
+      mimeType: "",
+      sizeBytes: 0,
+      uploadedAt: null,
+      source: "MANUAL"
+    };
+  }
+
+  const fileUrl = String(value.fileUrl || "").trim();
+  const isUploaded = value.isUploaded === true || Boolean(fileUrl);
+  const source = String(value.source || "MANUAL").trim().toUpperCase();
+  const normalizedSource = ["PROFILE_UPLOAD", "APPLICATION_UPLOAD", "MANUAL"].includes(source)
+    ? source
+    : "MANUAL";
+  const uploadedAtCandidate = value.uploadedAt ? new Date(value.uploadedAt) : null;
+  return {
+    isUploaded,
+    fileUrl,
+    cloudinaryPublicId: String(value.cloudinaryPublicId || "").trim(),
+    fileName: String(value.fileName || "").trim(),
+    mimeType: String(value.mimeType || "").trim(),
+    sizeBytes: Number(value.sizeBytes || 0),
+    uploadedAt:
+      uploadedAtCandidate && !Number.isNaN(uploadedAtCandidate.getTime()) ? uploadedAtCandidate : null,
+    source: normalizedSource
+  };
+}
+
+function normalizeProfileDocuments(input = {}) {
+  return PROFILE_DOCUMENT_KEYS.reduce((acc, key) => {
+    acc[key] = normalizeStoredDocumentMeta(input?.[key]);
+    return acc;
+  }, {});
+}
+
+function isDocumentUploaded(value) {
+  if (value === true) return true;
+  if (!value || typeof value !== "object") return false;
+  if (value.isUploaded === true) return true;
+  if (String(value.fileUrl || "").trim()) return true;
+  return false;
+}
+
+const PROFILE_REQUIRED_FIELD_PATHS = [
+  "personal.firstName",
+  "personal.lastName",
+  "personal.fatherName",
+  "personal.motherName",
+  "gender",
+  "dateOfBirth",
+  "mobile",
+  "category",
+  "annualIncome",
+  "address.state",
+  "address.district",
+  "address.taluka",
+  "address.pincode",
+  "address.line1",
+  "education.educationLevel",
+  "education.course",
+  "education.institute",
+  "education.university",
+  "education.currentYear",
+  "education.admissionYear",
+  "education.percentage",
+  "bankDetails.accountHolderName",
+  "bankDetails.accountNumber",
+  "bankDetails.ifscCode",
+  "bankDetails.bankName",
+  "financial.incomeCertificateNumber"
+];
+
+const PROFILE_REQUIRED_DOCUMENT_KEYS = [
+  "aadhaar",
+  "incomeCertificate",
+  "domicileCertificate",
+  "marksheet",
+  "bankPassbook",
+  "admissionLetter"
+];
+
+function getPathValue(obj, path) {
+  return String(path || "")
+    .split(".")
+    .reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
+}
+
+function hasFilledValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return value;
+  return true;
+}
+
+function calculateProfileCompletion(profile) {
+  const filledCore = PROFILE_REQUIRED_FIELD_PATHS.filter((path) => hasFilledValue(getPathValue(profile, path))).length;
+  const docs = profile?.documents || {};
+  const filledDocs = PROFILE_REQUIRED_DOCUMENT_KEYS.filter((key) => isDocumentUploaded(docs[key])).length;
+  const total = PROFILE_REQUIRED_FIELD_PATHS.length + PROFILE_REQUIRED_DOCUMENT_KEYS.length;
+  if (total === 0) return 0;
+  return Math.round(((filledCore + filledDocs) / total) * 100);
+}
+
+function humanizeProfileDocumentKey(documentKey) {
+  return String(documentKey || "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
 function getDeadlineInfo(dateValue) {
@@ -149,23 +303,34 @@ export const upsertMyProfile = async (req, res) => {
       gender: req.body.gender,
       dateOfBirth: req.body.dateOfBirth,
       mobile: req.body.mobile,
+      personal: req.body.personal || {},
       address: req.body.address || {},
+      family: req.body.family || {},
       education: req.body.education || {},
       category: req.body.category,
       annualIncome: req.body.annualIncome,
+      bankDetails: req.body.bankDetails || {},
       financial: req.body.financial || {},
+      social: req.body.social || {},
       preferredLanguages: req.body.preferredLanguages || ["en", "hi", "mr"],
       notificationPreferences: req.body.notificationPreferences || {}
     };
 
-    const profileCompletion = calculateProfileCompletion(update);
-    update.profileCompletion = profileCompletion;
+    if (req.body.documents !== undefined) {
+      update.documents = normalizeProfileDocuments(req.body.documents || {});
+    }
 
     const profile = await UserProfile.findOneAndUpdate(
       { userId: req.user.id },
       { ...update, userId: req.user.id },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
+
+    const profileCompletion = calculateProfileCompletion(profile);
+    if (profile.profileCompletion !== profileCompletion) {
+      profile.profileCompletion = profileCompletion;
+      await profile.save();
+    }
 
     if (profileCompletion < 75) {
       await ensureNotification({
@@ -180,6 +345,62 @@ export const upsertMyProfile = async (req, res) => {
     res.json({ message: "Profile saved", profile });
   } catch (error) {
     res.status(500).json({ message: "Failed to save profile", error: error.message });
+  }
+};
+
+export const uploadProfileDocument = async (req, res) => {
+  try {
+    const { documentType } = req.body;
+    if (!documentType || !String(documentType).trim()) {
+      return res.status(400).json({ message: "documentType is required" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "Document file is required" });
+    }
+
+    const documentKey = getProfileDocumentFieldPath(documentType);
+    if (!documentKey) {
+      return res.status(400).json({
+        message: "Unsupported profile document type."
+      });
+    }
+
+    const checksum = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+    const cloudinaryUpload = await uploadBufferToCloudinary(req.file.buffer, {
+      publicId: `${req.user.id}_profile_${documentKey}_${Date.now()}`
+    });
+
+    const setPatch = {
+      [`documents.${documentKey}.isUploaded`]: true,
+      [`documents.${documentKey}.fileUrl`]: cloudinaryUpload.secureUrl,
+      [`documents.${documentKey}.cloudinaryPublicId`]: cloudinaryUpload.publicId,
+      [`documents.${documentKey}.fileName`]: req.file.originalname,
+      [`documents.${documentKey}.mimeType`]: req.file.mimetype,
+      [`documents.${documentKey}.sizeBytes`]: req.file.size,
+      [`documents.${documentKey}.uploadedAt`]: new Date(),
+      [`documents.${documentKey}.source`]: "PROFILE_UPLOAD"
+    };
+
+    const profile = await UserProfile.findOneAndUpdate(
+      { userId: req.user.id },
+      { $set: setPatch, $setOnInsert: { userId: req.user.id } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    const profileCompletion = calculateProfileCompletion(profile);
+    if (profile.profileCompletion !== profileCompletion) {
+      profile.profileCompletion = profileCompletion;
+      await profile.save();
+    }
+
+    res.status(201).json({
+      message: `${humanizeProfileDocumentKey(documentKey)} uploaded successfully.`,
+      checksum,
+      document: profile.documents?.[documentKey] || null,
+      profile
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Profile document upload failed", error: error.message });
   }
 };
 
@@ -201,6 +422,11 @@ export const getStudentDashboard = async (req, res) => {
     ]);
 
     const recommendations = recommendScholarships(profile, scholarships);
+    const profileCompletion = profile?.profileCompletion || 0;
+    const profileReadyForStrictMatching = profileCompletion >= 85;
+    const eligibleOnlyRecommendations = profileReadyForStrictMatching
+      ? recommendations.eligible
+      : [];
 
     for (const application of applications) {
       const progressPercent = calculateProgress(application);
@@ -259,19 +485,18 @@ export const getStudentDashboard = async (req, res) => {
       profile: profile || null,
       portalDisclaimer:
         "Final submission and verification happens on official government/NGO scholarship portals only.",
-      profileCompletion: profile?.profileCompletion || 0,
+      profileCompletion,
+      matchingMode: profileReadyForStrictMatching ? "ELIGIBLE_ONLY" : "PROFILE_INCOMPLETE",
       metrics: {
-        eligibleScholarships: recommendations.eligible.length,
-        partiallyEligibleScholarships: recommendations.partiallyEligible.length,
+        eligibleScholarships: eligibleOnlyRecommendations.length,
+        partiallyEligibleScholarships: 0,
         inProgressApplications: applications.filter((app) => app.status === "IN_PROGRESS").length,
         pendingReview: applications.filter((app) => app.status === "PENDING" || app.status === "APPLIED").length,
         approvedCount: applications.filter((app) => app.status === "APPROVED").length
       },
-      recommendedScholarships: decorateRecommendationList(recommendations.eligible.slice(0, 8)),
-      partiallyEligibleScholarships: decorateRecommendationList(
-        recommendations.partiallyEligible.slice(0, 8)
-      ),
-      nearMissScholarships: decorateRecommendationList(recommendations.nearMisses.slice(0, 5)),
+      recommendedScholarships: decorateRecommendationList(eligibleOnlyRecommendations.slice(0, 12)),
+      partiallyEligibleScholarships: [],
+      nearMissScholarships: [],
       upcomingDeadlines,
       applications,
       notifications,
@@ -292,10 +517,17 @@ export const getRecommendedScholarships = async (req, res) => {
     }).sort({ deadline: 1 });
 
     const recommendations = recommendScholarships(profile, scholarships);
+    const profileCompletion = profile?.profileCompletion || 0;
+    const profileReadyForStrictMatching = profileCompletion >= 85;
+
     res.json({
-      eligible: decorateRecommendationList(recommendations.eligible),
-      partiallyEligible: decorateRecommendationList(recommendations.partiallyEligible),
-      nearMisses: decorateRecommendationList(recommendations.nearMisses)
+      profileCompletion,
+      matchingMode: profileReadyForStrictMatching ? "ELIGIBLE_ONLY" : "PROFILE_INCOMPLETE",
+      eligible: decorateRecommendationList(
+        profileReadyForStrictMatching ? recommendations.eligible : []
+      ),
+      partiallyEligible: [],
+      nearMisses: []
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch recommendations", error: error.message });
@@ -306,6 +538,9 @@ export const getScholarshipDiscovery = async (req, res) => {
   try {
     const profile = await getStudentProfile(req.user.id);
     const scholarships = await Scholarship.find(applyScholarshipFilters(req.query)).sort({ deadline: 1 });
+    const eligibleOnlyQuery = String(req.query?.eligibleOnly || "false").toLowerCase() === "true";
+    const profileCompletion = profile?.profileCompletion || 0;
+    const profileReadyForStrictMatching = profileCompletion >= 85;
 
     const enriched = scholarships.map((scholarship) => {
       const eligibility = evaluateEligibility(profile, scholarship);
@@ -315,7 +550,13 @@ export const getScholarshipDiscovery = async (req, res) => {
       };
     });
 
-    res.json(enriched);
+    const filtered = eligibleOnlyQuery
+      ? enriched.filter((item) =>
+          profileReadyForStrictMatching ? item.eligibilityStatus === "ELIGIBLE" : false
+        )
+      : enriched;
+
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch scholarships", error: error.message });
   }
@@ -668,11 +909,22 @@ export const uploadApplicationDocument = async (req, res) => {
     application.lastUpdated = new Date();
     await application.save();
 
-    const profileDocumentFieldPath = getProfileDocumentFieldPath(normalizedType);
-    if (profileDocumentFieldPath) {
+    const profileDocumentKey = getProfileDocumentFieldPath(normalizedType);
+    if (profileDocumentKey) {
       await UserProfile.findOneAndUpdate(
         { userId: req.user.id },
-        { $set: { [profileDocumentFieldPath]: true } },
+        {
+          $set: {
+            [`documents.${profileDocumentKey}.isUploaded`]: true,
+            [`documents.${profileDocumentKey}.fileUrl`]: cloudinaryUpload.secureUrl,
+            [`documents.${profileDocumentKey}.cloudinaryPublicId`]: cloudinaryUpload.publicId,
+            [`documents.${profileDocumentKey}.fileName`]: req.file.originalname,
+            [`documents.${profileDocumentKey}.mimeType`]: req.file.mimetype,
+            [`documents.${profileDocumentKey}.sizeBytes`]: req.file.size,
+            [`documents.${profileDocumentKey}.uploadedAt`]: new Date(),
+            [`documents.${profileDocumentKey}.source`]: "APPLICATION_UPLOAD"
+          }
+        },
         { upsert: true, setDefaultsOnInsert: true }
       );
     }

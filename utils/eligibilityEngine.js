@@ -2,8 +2,20 @@ const DOC_PROFILE_FIELD_MAP = {
   AADHAAR: "aadhaar",
   INCOME_CERTIFICATE: "incomeCertificate",
   CASTE_CERTIFICATE: "casteCertificate",
+  CASTE_VALIDITY_CERTIFICATE: "casteValidityCertificate",
+  NON_CREAMY_LAYER_CERTIFICATE: "nonCreamyLayerCertificate",
   DOMICILE: "domicileCertificate",
-  MARKSHEET: "marksheet"
+  MARKSHEET: "marksheet",
+  TRANSFER_CERTIFICATE: "transferCertificate",
+  GAP_CERTIFICATE: "gapCertificate",
+  BANK_PASSBOOK: "bankPassbook",
+  FEE_RECEIPT: "feeReceipt",
+  ADMISSION_LETTER: "admissionLetter",
+  BONAFIDE_CERTIFICATE: "bonafideCertificate",
+  DISABILITY_CERTIFICATE: "disabilityCertificate",
+  MINORITY_DECLARATION: "minorityDeclaration",
+  RATION_CARD: "rationCard",
+  SELF_DECLARATION: "selfDeclaration"
 };
 
 function normalizeDocumentType(value) {
@@ -34,9 +46,31 @@ function getProfileDocumentKey(rawDocument) {
   if (normalized.includes("AADHAAR")) return DOC_PROFILE_FIELD_MAP.AADHAAR;
   if (normalized.includes("INCOME_CERTIFICATE")) return DOC_PROFILE_FIELD_MAP.INCOME_CERTIFICATE;
   if (normalized.includes("CASTE_CERTIFICATE")) return DOC_PROFILE_FIELD_MAP.CASTE_CERTIFICATE;
+  if (normalized.includes("CASTE_VALIDITY")) return DOC_PROFILE_FIELD_MAP.CASTE_VALIDITY_CERTIFICATE;
+  if (normalized.includes("NON_CREAMY") || normalized.includes("NCL")) {
+    return DOC_PROFILE_FIELD_MAP.NON_CREAMY_LAYER_CERTIFICATE;
+  }
   if (normalized.includes("DOMICILE")) return DOC_PROFILE_FIELD_MAP.DOMICILE;
   if (normalized.includes("MARKSHEET") || normalized.includes("TRANSCRIPT")) {
     return DOC_PROFILE_FIELD_MAP.MARKSHEET;
+  }
+  if (normalized.includes("TRANSFER_CERTIFICATE") || normalized.includes("LEAVING_CERTIFICATE")) {
+    return DOC_PROFILE_FIELD_MAP.TRANSFER_CERTIFICATE;
+  }
+  if (normalized.includes("GAP_CERTIFICATE")) return DOC_PROFILE_FIELD_MAP.GAP_CERTIFICATE;
+  if (normalized.includes("PASSBOOK") || normalized.includes("BANK_BOOK")) {
+    return DOC_PROFILE_FIELD_MAP.BANK_PASSBOOK;
+  }
+  if (normalized.includes("FEE_RECEIPT")) return DOC_PROFILE_FIELD_MAP.FEE_RECEIPT;
+  if (normalized.includes("ADMISSION_LETTER") || normalized.includes("ALLOTMENT_LETTER")) {
+    return DOC_PROFILE_FIELD_MAP.ADMISSION_LETTER;
+  }
+  if (normalized.includes("BONAFIDE")) return DOC_PROFILE_FIELD_MAP.BONAFIDE_CERTIFICATE;
+  if (normalized.includes("DISABILITY")) return DOC_PROFILE_FIELD_MAP.DISABILITY_CERTIFICATE;
+  if (normalized.includes("MINORITY")) return DOC_PROFILE_FIELD_MAP.MINORITY_DECLARATION;
+  if (normalized.includes("RATION_CARD")) return DOC_PROFILE_FIELD_MAP.RATION_CARD;
+  if (normalized.includes("SELF_DECLARATION") || normalized.includes("UNDERTAKING")) {
+    return DOC_PROFILE_FIELD_MAP.SELF_DECLARATION;
   }
   return DOC_PROFILE_FIELD_MAP[normalized] || null;
 }
@@ -56,7 +90,15 @@ function getMissingProfileDocuments(profile, scholarship) {
 
   const profileDocs = profile?.documents || {};
   return Array.from(required.entries())
-    .filter(([profileKey]) => !Boolean(profileDocs[profileKey]))
+    .filter(([profileKey]) => {
+      const value = profileDocs[profileKey];
+      if (value === true) return false;
+      if (value && typeof value === "object") {
+        if (value.isUploaded === true) return false;
+        if (String(value.fileUrl || "").trim()) return false;
+      }
+      return true;
+    })
     .map(([, label]) => label);
 }
 
