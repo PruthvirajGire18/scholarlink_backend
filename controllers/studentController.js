@@ -28,6 +28,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const APPLICATION_POPULATE_FIELDS =
   "title description benefits eligibility deadline amount provider documentsRequired commonMistakes applicationProcess";
 const STUDENT_TRACKABLE_STATUSES = new Set(["APPLIED", "PENDING", "APPROVED", "REJECTED"]);
+const PROFILE_LANGUAGE_OPTIONS = ["en", "hi", "mr"];
+const PROFILE_CATEGORY_OPTIONS = ["OPEN", "OBC", "SC", "ST", "VJNT", "EWS", "SEBC"];
 
 const DOCUMENT_PROFILE_FIELD_MAP = {
   AADHAAR: "aadhaar",
@@ -143,6 +145,48 @@ function normalizeProfileDocuments(input = {}) {
     acc[key] = normalizeStoredDocumentMeta(input?.[key]);
     return acc;
   }, {});
+}
+
+function normalizeOptionalString(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function normalizeOptionalDate(value) {
+  const text = normalizeOptionalString(value);
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "__INVALID_DATE__";
+  return parsed;
+}
+
+function normalizeGender(value) {
+  const text = normalizeOptionalString(value);
+  if (!text) return null;
+  const normalized = text.toUpperCase();
+  return ["MALE", "FEMALE", "OTHER"].includes(normalized) ? normalized : "__INVALID_GENDER__";
+}
+
+function normalizeCategory(value) {
+  const text = normalizeOptionalString(value);
+  if (!text) return null;
+  const normalized = text.toUpperCase();
+  return PROFILE_CATEGORY_OPTIONS.includes(normalized) ? normalized : "__INVALID_CATEGORY__";
+}
+
+function normalizeMobile(value) {
+  const text = normalizeOptionalString(value);
+  if (!text) return null;
+  return /^[6-9]\d{9}$/.test(text) ? text : "__INVALID_MOBILE__";
+}
+
+function sanitizePreferredLanguages(value) {
+  const incoming = Array.isArray(value) ? value : [];
+  const normalized = incoming
+    .map((item) => String(item || "").trim().toLowerCase())
+    .filter((item) => PROFILE_LANGUAGE_OPTIONS.includes(item));
+  return normalized.length > 0 ? [...new Set(normalized)] : ["en"];
 }
 
 function isDocumentUploaded(value) {
@@ -307,6 +351,16 @@ async function getStudentProfile(studentId) {
   return UserProfile.findOne({ userId: studentId });
 }
 
+async function syncProfileCompletion(profile) {
+  if (!profile) return 0;
+  const completion = calculateProfileCompletion(profile);
+  if (profile.profileCompletion !== completion) {
+    profile.profileCompletion = completion;
+    await UserProfile.updateOne({ _id: profile._id }, { $set: { profileCompletion: completion } });
+  }
+  return completion;
+}
+
 function applyScholarshipFilters(query = {}) {
   const filter = {
     status: "APPROVED",
@@ -340,26 +394,47 @@ export const getMyProfile = async (req, res) => {
 
 export const upsertMyProfile = async (req, res) => {
   try {
-    const preferredFromBody = Array.isArray(req.body.preferredLanguages)
+    const preferredFromBodyRaw = Array.isArray(req.body.preferredLanguages)
       ? req.body.preferredLanguages
       : req.body.preferredLanguage
         ? [req.body.preferredLanguage]
         : ["en", "hi", "mr"];
 
+    const gender = normalizeGender(req.body.gender);
+    const dateOfBirth = normalizeOptionalDate(req.body.dateOfBirth);
+    const mobile = normalizeMobile(req.body.mobile);
+    const category = normalizeCategory(req.body.category);
+    const preferredLanguages = sanitizePreferredLanguages(preferredFromBodyRaw);
+
+    if (gender === "__INVALID_GENDER__") {
+      return res.status(400).json({ message: "gender must be MALE, FEMALE or OTHER" });
+    }
+    if (dateOfBirth === "__INVALID_DATE__") {
+      return res.status(400).json({ message: "dateOfBirth must be a valid date" });
+    }
+    if (mobile === "__INVALID_MOBILE__") {
+      return res.status(400).json({ message: "Invalid mobile number" });
+    }
+    if (category === "__INVALID_CATEGORY__") {
+      return res.status(400).json({
+        message: `category must be one of ${PROFILE_CATEGORY_OPTIONS.join(", ")}`
+      });
+    }
+
     const update = {
-      gender: req.body.gender,
-      dateOfBirth: req.body.dateOfBirth,
-      mobile: req.body.mobile,
+      gender: gender || undefined,
+      dateOfBirth: dateOfBirth || undefined,
+      mobile: mobile || undefined,
       personal: req.body.personal || {},
       address: req.body.address || {},
       family: req.body.family || {},
       education: req.body.education || {},
-      category: req.body.category,
+      category: category || undefined,
       annualIncome: req.body.annualIncome,
       bankDetails: req.body.bankDetails || {},
       financial: req.body.financial || {},
       social: req.body.social || {},
-      preferredLanguages: preferredFromBody,
+      preferredLanguages,
       notificationPreferences: req.body.notificationPreferences || {}
     };
 
@@ -373,11 +448,7 @@ export const upsertMyProfile = async (req, res) => {
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
-    const profileCompletion = calculateProfileCompletion(profile);
-    if (profile.profileCompletion !== profileCompletion) {
-      profile.profileCompletion = profileCompletion;
-      await profile.save();
-    }
+    const profileCompletion = await syncProfileCompletion(profile);
 
     if (profileCompletion < 75) {
       await ensureNotification({
@@ -391,6 +462,12 @@ export const upsertMyProfile = async (req, res) => {
 
     res.json({ message: "Profile saved", profile });
   } catch (error) {
+    if (error?.name === "ValidationError" || error?.name === "CastError") {
+      return res.status(400).json({
+        message: "Invalid profile data",
+        error: error.message
+      });
+    }
     res.status(500).json({ message: "Failed to save profile", error: error.message });
   }
 };
@@ -434,11 +511,7 @@ export const uploadProfileDocument = async (req, res) => {
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
-    const profileCompletion = calculateProfileCompletion(profile);
-    if (profile.profileCompletion !== profileCompletion) {
-      profile.profileCompletion = profileCompletion;
-      await profile.save();
-    }
+    const profileCompletion = await syncProfileCompletion(profile);
 
     res.status(201).json({
       message: `${humanizeProfileDocumentKey(documentKey)} uploaded successfully.`,
