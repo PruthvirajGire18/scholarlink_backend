@@ -250,6 +250,47 @@ async function ensureNotification({ userId, type, title, message, data = {} }) {
   }
 }
 
+async function pickModeratorForAssistance(preferredModeratorId = null) {
+  const moderators = await User.find({ role: "MODERATOR" }).select("_id").lean();
+  if (moderators.length === 0) return null;
+
+  const moderatorIds = moderators.map((moderator) => moderator._id);
+  const openCounts = await AssistanceRequest.aggregate([
+    {
+      $match: {
+        status: "OPEN",
+        moderatorId: { $in: moderatorIds }
+      }
+    },
+    {
+      $group: {
+        _id: "$moderatorId",
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+
+  const countMap = new Map(openCounts.map((item) => [String(item._id), Number(item.count || 0)]));
+  const preferredId = preferredModeratorId ? String(preferredModeratorId) : "";
+
+  const rankedModerators = moderators
+    .map((moderator) => {
+      const idStr = String(moderator._id);
+      return {
+        _id: moderator._id,
+        openCount: countMap.get(idStr) || 0,
+        isPreferred: preferredId && preferredId === idStr
+      };
+    })
+    .sort((a, b) => {
+      if (a.openCount !== b.openCount) return a.openCount - b.openCount;
+      if (a.isPreferred !== b.isPreferred) return a.isPreferred ? -1 : 1;
+      return String(a._id).localeCompare(String(b._id));
+    });
+
+  return rankedModerators[0]?._id || null;
+}
+
 function syncDocumentsRoadmapStep(application) {
   const allUploaded = (application.documentChecklist || []).every((item) => !item.isRequired || item.isUploaded);
   application.roadmapSteps = markStep(application.roadmapSteps, "documents", allUploaded);
@@ -991,11 +1032,6 @@ export const createAssistanceRequest = async (req, res) => {
       return res.status(400).json({ message: "Scholarship not available for assistance" });
     }
 
-    const moderatorId = scholarship.createdBy;
-    if (!moderatorId) {
-      return res.status(400).json({ message: "No moderator assigned for this scholarship" });
-    }
-
     const application = await Application.findOne({
       studentId: req.user.id,
       scholarshipId
@@ -1020,6 +1056,13 @@ export const createAssistanceRequest = async (req, res) => {
       return res.status(400).json({ message: "You already have an open request for this scholarship" });
     }
 
+    const moderatorId = await pickModeratorForAssistance(scholarship.createdBy);
+    if (!moderatorId) {
+      return res.status(503).json({
+        message: "No moderator is available right now. Please try again in a few minutes."
+      });
+    }
+
     const created = await AssistanceRequest.create({
       studentId: req.user.id,
       scholarshipId,
@@ -1031,6 +1074,19 @@ export const createAssistanceRequest = async (req, res) => {
     const populated = await AssistanceRequest.findById(created._id)
       .populate("scholarshipId", "title")
       .populate("moderatorId", "name email");
+
+    await ensureNotification({
+      userId: moderatorId,
+      type: "ADMIN_MESSAGE",
+      title: "New student help request",
+      message: `A student requested help for "${scholarship.title}".`,
+      data: {
+        signature: `assistance-${created._id}`,
+        assistanceRequestId: created._id,
+        scholarshipId: scholarship._id,
+        studentId: req.user.id
+      }
+    });
 
     res.status(201).json({
       message: "Assistance request created",

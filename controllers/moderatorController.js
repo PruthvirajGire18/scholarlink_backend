@@ -23,6 +23,42 @@ function sanitizeStringList(value) {
     .filter(Boolean);
 }
 
+function humanizeDocumentKey(value) {
+  return String(value || "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function getUploadedProfileDocuments(profile) {
+  const documents = profile?.documents || {};
+  return Object.entries(documents)
+    .map(([key, value]) => {
+      if (!value || typeof value !== "object") return null;
+      const fileUrl = String(value.fileUrl || "").trim();
+      const isUploaded = value.isUploaded === true || Boolean(fileUrl);
+      if (!isUploaded) return null;
+      return {
+        key,
+        label: humanizeDocumentKey(key),
+        fileUrl,
+        fileName: String(value.fileName || "").trim(),
+        mimeType: String(value.mimeType || "").trim(),
+        sizeBytes: Number(value.sizeBytes || 0),
+        source: String(value.source || "").trim(),
+        uploadedAt: value.uploadedAt || null
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aTs = new Date(a.uploadedAt || 0).getTime();
+      const bTs = new Date(b.uploadedAt || 0).getTime();
+      return bTs - aTs;
+    });
+}
+
 function normalizeScholarshipPayload(body, existing = {}) {
   return {
     title: String(body.title || existing.title || "").trim(),
@@ -222,6 +258,7 @@ export const getAssistanceRequestDetail = async (req, res) => {
     res.json({
       assistanceRequest: request,
       studentProfile,
+      profileDocuments: getUploadedProfileDocuments(studentProfile),
       application,
       documents,
       disclaimer:
